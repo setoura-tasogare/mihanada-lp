@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "post": "tsx --env-file=.env.local scripts/post-blog.ts",
-    "delete": "tsx --env-file=.env.local scripts/delete-blog.ts"
+    "delete": "tsx --env-file=.env.local scripts/delete-blog.ts",
+    "line:rich-menu": "tsx --env-file=.env.local scripts/setup-line-rich-menu.ts"
   },
   "dependencies": {
     "@next/third-parties": "^16.3.1",

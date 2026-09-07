@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2500" height="1686" viewBox="0 0 2500 1686">
+  <rect width="2500" height="1686" fill="#F4F1EA"/>
+  <rect x="0" y="0" width="1250" height="843" fill="#1B2730"/>
+  <rect x="1250" y="843" width="1250" height="843" fill="#1B2730"/>
+  <path d="M1250 0V1686M0 843H2500" stroke="#6E9FC0" stroke-width="3" opacity=".8"/>
+  <g font-family="Hiragino Mincho ProN, Yu Mincho, serif" letter-spacing="8">
+    <text x="100" y="150" fill="#6E9FC0" font-family="Georgia, serif" font-size="38" letter-spacing="10">DIGITAL GYOTAKU</text>
+    <text x="100" y="325" fill="#F4F1EA" font-size="82">デジタル魚拓</text>
+    <text x="100" y="405" fill="#EEF2F4" font-family="Hiragino Kaku Gothic ProN, sans-serif" font-size="34" letter-spacing="3">写真から作品へ</text>
+    <text x="1350" y="150" fill="#4D7C9C" font-family="Georgia, serif" font-size="38" letter-spacing="10">FISH LEATHER</text>
+    <text x="1350" y="325" fill="#2B3138" font-size="82">フィッシュレザー</text>
+    <text x="1350" y="405" fill="#5D646C" font-family="Hiragino Kaku Gothic ProN, sans-serif" font-size="34" letter-spacing="3">魚の皮を革へ</text>
+    <text x="100" y="995" fill="#4D7C9C" font-family="Georgia, serif" font-size="38" letter-spacing="10">ABOUT MIHANADA</text>
+    <text x="100" y="1170" fill="#2B3138" font-size="82">MIHANADAについて</text>
+    <text x="100" y="1250" fill="#5D646C" font-family="Hiragino Kaku Gothic ProN, sans-serif" font-size="34" letter-spacing="3">活動・最新情報を見る</text>
+    <text x="1350" y="995" fill="#6E9FC0" font-family="Georgia, serif" font-size="38" letter-spacing="10">CONTACT</text>
+    <text x="1350" y="1170" fill="#F4F1EA" font-size="82">お問い合わせ</text>
+    <text x="1350" y="1250" fill="#EEF2F4" font-family="Hiragino Kaku Gothic ProN, sans-serif" font-size="34" letter-spacing="3">まずは相談する</text>
+  </g>
+  <g stroke="#6E9FC0" stroke-width="4" fill="none" opacity=".9">
+    <path d="M100 505h1040M1350 505h1040M100 1350h1040M1350 1350h1040"/>
+  </g>
+  <text x="100" y="770" fill="#6E9FC0" font-family="Georgia, serif" font-size="28" letter-spacing="8">MIHANADA — IKI, NAGASAKI</text>
+  <text x="1350" y="1610" fill="#6E9FC0" font-family="Georgia, serif" font-size="28" letter-spacing="8">MIHANADA — IKI, NAGASAKI</text>
+</svg>

@@ -111,12 +111,11 @@ export function digitalGyotakuFlex(): FlexMessage {
   return serviceFlex({
     eyebrow: "DIGITAL GYOTAKU",
     title: "写真から、魚拓作品へ。",
-    body: "釣果の写真をもとに、一匹の記憶を作品として残します。制作の流れや作品例をご覧いただけます。",
+    body: "釣果の写真をもとに、一匹の記憶を作品として残します。つくり方・写真の撮り方・料金の目安はホームページでご覧いただけます。",
     image: "/images/service-gyotaku.jpg",
     altText: "デジタル魚拓のご案内",
     actions: [
-      button(postback("制作の流れを見る", "gyotaku_flow")),
-      button(uri("作品例を見る", "/digital-gyotaku")),
+      button(uri("料金・つくり方を見る", "/digital-gyotaku")),
       button(message("写真を送って相談する", "デジタル魚拓を相談したい"), true),
     ],
   });
@@ -125,14 +124,14 @@ export function digitalGyotakuFlex(): FlexMessage {
 export function fishLeatherFlex(): FlexMessage {
   return serviceFlex({
     eyebrow: "FISH LEATHER",
-    title: "魚の皮を、革に。",
-    body: "壱岐の海の魚の皮を、一枚ずつなめして革製品に仕立てます。商品とオーダー制作をご案内します。",
+    title: "商品と、オーダーメイド。",
+    body: "既存のフィッシュレザー製品のご案内と、釣った魚の皮から一点ものを仕立てるオーダーメイドを承ります。",
     image: "/images/fish-leather/hero.jpg",
     altText: "フィッシュレザーのご案内",
     actions: [
-      button(uri("商品を見る", "/fish-leather")),
-      button(postback("オーダーについて", "leather_order")),
-      button(message("相談する", "フィッシュレザーを相談したい"), true),
+      button(message("商品について問い合わせる", "フィッシュレザーの商品について問い合わせたい")),
+      button(message("オーダーメイドを相談する", "フィッシュレザーのオーダーメイドを相談したい"), true),
+      button(uri("ホームページを見る", "/fish-leather")),
     ],
   });
 }
@@ -160,7 +159,8 @@ export function contactFlex(): FlexMessage {
     altText: "お問い合わせのご案内",
     actions: [
       button(message("デジタル魚拓", "デジタル魚拓を相談したい")),
-      button(message("フィッシュレザー", "フィッシュレザーを相談したい")),
+      button(message("フィッシュレザーの商品", "フィッシュレザーの商品について問い合わせたい")),
+      button(message("フィッシュレザーのオーダー", "フィッシュレザーのオーダーメイドを相談したい")),
       button(message("その他", "その他の相談をしたい"), true),
     ],
   });
@@ -201,10 +201,16 @@ export function consultationReply(text: string) {
       text: "デジタル魚拓のご相談ですね。\n\n魚全体が分かる写真を、このトークにお送りください。仕上がりのご希望があれば、あわせてお知らせください。\n\n内容を確認して、制作可否や進め方をご案内します。",
     };
   }
-  if (text === "フィッシュレザーを相談したい") {
+  if (text === "フィッシュレザーの商品について問い合わせたい") {
     return {
       type: "text",
-      text: "フィッシュレザーのご相談ですね。\n\n魚種・サイズと、皮全体が分かる写真をお送りください。皮の保存方法や、仕立てられる製品についてご案内します。",
+      text: "フィッシュレザーの商品についてのお問い合わせですね。\n\n気になっている商品名や、色・在庫・お受け取り方法など、知りたいことをこのトークにお送りください。確認してご案内します。",
+    };
+  }
+  if (text === "フィッシュレザーのオーダーメイドを相談したい") {
+    return {
+      type: "text",
+      text: "フィッシュレザーのオーダーメイドをご検討ですね。\n\n分かる範囲で、魚種・サイズ・魚をお持ちかどうか・作りたいものをお送りください。魚の皮全体が分かる写真もあわせていただけると、進め方をご案内しやすくなります。",
     };
   }
   return {

@@ -15,6 +15,12 @@ type LineEvent = {
   postback?: { data?: string };
 };
 
+const richMenuMessages: Record<string, string> = {
+  "デジタル魚拓について知りたい": "gyotaku",
+  "フィッシュレザーについて知りたい": "fish_leather",
+  "お問い合わせをしたい": "contact",
+};
+
 function getPostbackAction(data?: string) {
   if (!data) return undefined;
   return new URLSearchParams(data).get("action") ?? undefined;
@@ -42,9 +48,16 @@ export async function POST(request: Request) {
 
       if (event.type === "message" && event.message?.type === "text" && event.message.text) {
         const text = event.message.text;
+        const richMenuAction = richMenuMessages[text];
+        if (richMenuAction) {
+          const response = menuResponse(richMenuAction);
+          if (response) await replyLine(event.replyToken, [response]);
+          return;
+        }
         if (
           text === "デジタル魚拓を相談したい" ||
-          text === "フィッシュレザーを相談したい" ||
+          text === "フィッシュレザーの商品について問い合わせたい" ||
+          text === "フィッシュレザーのオーダーメイドを相談したい" ||
           text === "その他の相談をしたい"
         ) {
           await replyLine(event.replyToken, [consultationReply(text)]);

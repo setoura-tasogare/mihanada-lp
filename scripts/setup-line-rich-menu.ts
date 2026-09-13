@@ -1,12 +1,14 @@
 import fs from "node:fs/promises";
+import { richMenu } from "../lib/line-rich-menu";
+import { checkLineConnection } from "./check-line-connection";
 
 const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
 if (!token) throw new Error("Set LINE_CHANNEL_ACCESS_TOKEN before running this script.");
 
 const imagePath = new URL("../public/line/rich-menu.png", import.meta.url);
 
-async function lineFetch(path: string, init: RequestInit = {}) {
-  const response = await fetch(`https://api.line.me${path}`, {
+async function lineFetch(path: string, init: RequestInit = {}, origin = "https://api.line.me") {
+  const response = await fetch(`${origin}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -17,31 +19,37 @@ async function lineFetch(path: string, init: RequestInit = {}) {
   return response;
 }
 
-const menu = {
-  size: { width: 2500, height: 1686 },
-  selected: true,
-  name: "MIHANADA 基本メニュー",
-  chatBarText: "MIHANADA メニュー",
-  areas: [
-    { bounds: { x: 0, y: 0, width: 1250, height: 843 }, action: { type: "message", text: "デジタル魚拓について知りたい" } },
-    { bounds: { x: 1250, y: 0, width: 1250, height: 843 }, action: { type: "message", text: "フィッシュレザーについて知りたい" } },
-    { bounds: { x: 0, y: 843, width: 1250, height: 843 }, action: { type: "uri", uri: "https://www.mihanada.site/" } },
-    { bounds: { x: 1250, y: 843, width: 1250, height: 843 }, action: { type: "message", text: "お問い合わせをしたい" } },
-  ],
-};
+async function main() {
+  // Verify the account and the deployed webhook before changing the default menu.
+  await checkLineConnection();
+  const image = await fs.readFile(imagePath);
+  if (image.length > 1024 * 1024) throw new Error("Rich menu image exceeds 1 MB.");
+  const previousResponse = await fetch("https://api.line.me/v2/bot/user/all/richmenu", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!previousResponse.ok && previousResponse.status !== 404) {
+    throw new Error(`Cannot check previous default menu (${previousResponse.status}).`);
+  }
+  const previous = previousResponse.status === 404 ? null : await previousResponse.json();
+  console.log("Previous API default menu:", previous?.richMenuId ?? "none (check Manager)");
 
-const created = (await lineFetch("/v2/bot/richmenu", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(menu),
-}).then((response) => response.json())) as { richMenuId: string };
+  const created = (await lineFetch("/v2/bot/richmenu", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(richMenu),
+  }).then((response) => response.json())) as { richMenuId: string };
 
-const image = await fs.readFile(imagePath);
-await lineFetch(`/v2/bot/richmenu/${created.richMenuId}/content`, {
-  method: "POST",
-  headers: { "Content-Type": "image/png" },
-  body: image,
-});
-await lineFetch(`/v2/bot/user/all/richmenu/${created.richMenuId}`, { method: "POST" });
+  console.log("Created menu:", created.richMenuId);
+  await lineFetch(`/v2/bot/richmenu/${created.richMenuId}/content`, {
+    method: "POST",
+    headers: { "Content-Type": "image/png" },
+    body: new Uint8Array(image),
+  }, "https://api-data.line.me");
+  await lineFetch(`/v2/bot/user/all/richmenu/${created.richMenuId}`, { method: "POST" });
 
-console.log(`Rich menu created and set as default: ${created.richMenuId}`);
+  const current = await lineFetch("/v2/bot/user/all/richmenu").then(r => r.json());
+  if (current.richMenuId !== created.richMenuId) throw new Error("Default menu verification failed.");
+  console.log(`Rich menu created and set as default: ${created.richMenuId}`);
+}
+
+main().catch(error => { console.error(error.message); process.exitCode = 1; });

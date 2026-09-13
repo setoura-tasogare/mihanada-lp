@@ -1,5 +1,3 @@
-import crypto from "node:crypto";
-
 type LineAction = Record<string, unknown>;
 type FlexMessage = {
   type: "flex";
@@ -7,7 +5,7 @@ type FlexMessage = {
   contents: Record<string, unknown>;
 };
 
-const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "https://www.mihanada.site").replace(/\/$/, "");
+const siteUrl = "https://www.mihanada.site";
 
 const colors = {
   paper: "#F4F1EA",
@@ -34,7 +32,7 @@ function button(action: LineAction, primary = false) {
   return {
     type: "button",
     style: primary ? "primary" : "secondary",
-    ...(primary ? { color: colors.accent } : {}),
+    ...(primary ? { color: colors.navy } : {}),
     action,
     margin: "md",
     height: "sm",
@@ -74,7 +72,6 @@ function serviceFlex(input: {
             size: "xs",
             color: "#4D7C9C",
             weight: "bold",
-            letterSpacing: "1px",
           },
           {
             type: "text",
@@ -207,7 +204,7 @@ export function consultationReply(text: string) {
       text: "フィッシュレザーの商品についてのお問い合わせですね。\n\n気になっている商品名や、色・在庫・お受け取り方法など、知りたいことをこのトークにお送りください。確認してご案内します。",
     };
   }
-  if (text === "フィッシュレザーのオーダーメイドを相談したい") {
+  if (text === "フィッシュレザーのオーダーメイドを相談したい" || text === "フィッシュレザーを相談したい") {
     return {
       type: "text",
       text: "フィッシュレザーのオーダーメイドをご検討ですね。\n\n分かる範囲で、魚種・サイズ・魚をお持ちかどうか・作りたいものをお送りください。魚の皮全体が分かる写真もあわせていただけると、進め方をご案内しやすくなります。",
@@ -217,37 +214,6 @@ export function consultationReply(text: string) {
     type: "text",
     text: "お問い合わせありがとうございます。\n\nご相談内容をこのトークにお送りください。内容を確認して、MIHANADAからご案内します。",
   };
-}
-
-export function verifyLineSignature(body: string, signature: string | null): boolean {
-  const secret = process.env.LINE_CHANNEL_SECRET;
-  if (!secret || !signature) return false;
-  const expected = crypto.createHmac("sha256", secret).update(body).digest("base64");
-  const expectedBuffer = Buffer.from(expected);
-  const signatureBuffer = Buffer.from(signature);
-
-  return (
-    expectedBuffer.length === signatureBuffer.length &&
-    crypto.timingSafeEqual(expectedBuffer, signatureBuffer)
-  );
-}
-
-export async function replyLine(replyToken: string, messages: unknown[]) {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!token) throw new Error("LINE_CHANNEL_ACCESS_TOKEN is not configured");
-
-  const response = await fetch("https://api.line.me/v2/bot/message/reply", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({ replyToken, messages }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`LINE reply failed: ${response.status} ${await response.text()}`);
-  }
 }
 
 export function menuResponse(action: string): FlexMessage | undefined {

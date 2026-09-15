@@ -11,6 +11,7 @@ const MAX_PHOTOS = 3;
 
 type Background = "mono" | "pale" | "wood";
 type OptionKey = "square" | "tackle" | "witness";
+type Photo = { file: File; url: string };
 
 const backgrounds: {
   value: Background;
@@ -36,8 +37,61 @@ const photoTips = [
   "明るい場所で、影が少ない",
 ];
 
+// 必須項目。Phase 2 以降はサーバ側でも同じ条件で検証する
+const requiredFields: { key: string; label: string }[] = [
+  { key: "species", label: "魚種" },
+  { key: "length", label: "全長" },
+  { key: "date", label: "釣行日" },
+  { key: "place", label: "釣れた場所" },
+  { key: "angler", label: "釣り人の名前" },
+];
+
 function yen(n: number) {
   return `¥${n.toLocaleString("ja-JP")}`;
+}
+
+function isPositiveNumber(v: string) {
+  const n = Number(v);
+  return v.trim() !== "" && Number.isFinite(n) && n > 0;
+}
+
+function validate(values: Record<string, string>, photoCount: number) {
+  const errors: string[] = [];
+  if (photoCount === 0) errors.push("写真を1枚以上選んでください");
+  for (const f of requiredFields) {
+    if (!values[f.key]?.trim()) errors.push(`${f.label}を入力してください`);
+  }
+  if (values.length?.trim() && !isPositiveNumber(values.length)) {
+    errors.push("全長は数字で入力してください");
+  }
+  if (values.weight?.trim() && !isPositiveNumber(values.weight)) {
+    errors.push("重さは数字で入力してください");
+  }
+  return errors;
+}
+
+// 選んだ写真の File とプレビュー用 object URL をまとめて持ち、URL の寿命を管理する
+function usePhotoPreviews(max: number) {
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  const photosRef = useRef<Photo[]>([]);
+
+  function commit(next: Photo[]) {
+    photosRef.current.forEach((p) => URL.revokeObjectURL(p.url));
+    photosRef.current = next;
+    setPhotos(next);
+  }
+
+  useEffect(
+    () => () => photosRef.current.forEach((p) => URL.revokeObjectURL(p.url)),
+    [],
+  );
+
+  return {
+    photos,
+    replace: (files: File[]) =>
+      commit(files.slice(0, max).map((file) => ({ file, url: URL.createObjectURL(file) }))),
+    release: () => commit([]),
+  };
 }
 
 export default function GyotakuOrderPage() {
@@ -46,7 +100,8 @@ export default function GyotakuOrderPage() {
   // 注文レコードの line_user_id / line_display_name と Stripe の metadata に渡す。
   // const { userId, displayName } = useLiffProfile();
 
-  const [photos, setPhotos] = useState<string[]>([]);
+  const { photos, replace: replacePhotos, release: releasePhotos } =
+    usePhotoPreviews(MAX_PHOTOS);
   const [dragOver, setDragOver] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [background, setBackground] = useState<Background>("mono");
@@ -55,14 +110,14 @@ export default function GyotakuOrderPage() {
     tackle: false,
     witness: false,
   });
+  const [errors, setErrors] = useState<string[]>([]);
   const [done, setDone] = useState(false);
+  const errorRef = useRef<HTMLDivElement>(null);
 
-  // プレビュー用の object URL を差し替え時・離脱時に解放する
-  const photosRef = useRef<string[]>([]);
+  // 送信のたびに errors は新しい配列になるので、エラーがあれば毎回一覧へフォーカスを移す
   useEffect(() => {
-    photosRef.current = photos;
-  }, [photos]);
-  useEffect(() => () => photosRef.current.forEach(URL.revokeObjectURL), []);
+    if (errors.length > 0) errorRef.current?.focus();
+  }, [errors]);
 
   const total =
     BASE_PRICE +
@@ -71,6 +126,7 @@ export default function GyotakuOrderPage() {
 
   function bind(key: string) {
     return {
+      name: key,
       value: values[key] ?? "",
       onChange: (
         e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
@@ -80,15 +136,20 @@ export default function GyotakuOrderPage() {
 
   function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
     setDragOver(false);
-    const files = Array.from(e.target.files ?? []).slice(0, MAX_PHOTOS);
+    const files = Array.from(e.target.files ?? []);
+    // ピッカーをキャンセルした場合は、選択済みの写真を残す
     if (files.length === 0) return;
-    photos.forEach(URL.revokeObjectURL);
-    setPhotos(files.map((f) => URL.createObjectURL(f)));
+    replacePhotos(files);
   }
 
-  function toCheckout() {
-    // UI のみ。Phase 3 でここを Stripe Checkout へのリダイレクトに置き換え、
-    // 下の完了画面は決済後の戻り先として表示する
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const found = validate(values, photos.length);
+    setErrors(found);
+    if (found.length > 0) return;
+    // UI のみ。Phase 3 でここを「サーバで注文作成 → Stripe Checkout へリダイレクト」に置き換え、
+    // 下の完了画面は決済後の戻り先として表示する（写真のアップロードはその前に済ませる）
+    releasePhotos();
     setDone(true);
     window.scrollTo({ top: 0 });
   }
@@ -104,7 +165,8 @@ export default function GyotakuOrderPage() {
         )}
 
         {!done ? (
-          <section className="pane">
+          <form className="pane" onSubmit={onSubmit} noValidate>
+            {/* required は支援技術向けに残し、エラーはブラウザの吹き出しではなく下の一覧にまとめて出す */}
             <h1 className="s-head">
               その一匹のこと、
               <br />
@@ -116,13 +178,17 @@ export default function GyotakuOrderPage() {
 
             <div className="block">
               <p className="eyebrow">Photo</p>
-              <h2 className="s-head">写真</h2>
+              <h2 className="s-head">
+                写真<span className="req" aria-hidden="true">*</span>
+              </h2>
               <div className="form">
                 <label className={`drop${dragOver ? " is-over" : ""}`}>
                   <input
                     type="file"
+                    name="photos"
                     accept="image/*"
                     multiple
+                    aria-label="写真を選ぶ（必須・最大3枚）"
                     onChange={onFiles}
                     onDragEnter={() => setDragOver(true)}
                     onDragLeave={() => setDragOver(false)}
@@ -138,7 +204,7 @@ export default function GyotakuOrderPage() {
                     <div key={i} className={`ph${i === 0 ? " is-main" : ""}`}>
                       {photos[i] ? (
                         // eslint-disable-next-line @next/next/no-img-element -- blob: のローカルプレビュー
-                        <img src={photos[i]} alt="" />
+                        <img src={photos[i].url} alt={`選んだ写真 ${i + 1}`} />
                       ) : (
                         String(i + 1).padStart(2, "0")
                       )}
@@ -161,7 +227,7 @@ export default function GyotakuOrderPage() {
                   <label htmlFor="gy-species">
                     Species<span className="jp">魚種</span><span className="req">*</span>
                   </label>
-                  <input id="gy-species" className="input" placeholder="例：マハタ" {...bind("species")} />
+                  <input id="gy-species" className="input" placeholder="例：マハタ" required {...bind("species")} />
                 </div>
                 <div className="field row">
                   <div className="field">
@@ -169,7 +235,7 @@ export default function GyotakuOrderPage() {
                       Length<span className="jp">全長</span><span className="req">*</span>
                     </label>
                     <div className="unit">
-                      <input id="gy-length" className="input" inputMode="decimal" placeholder="45" {...bind("length")} />
+                      <input id="gy-length" className="input" inputMode="decimal" placeholder="45" required {...bind("length")} />
                       <span>cm</span>
                     </div>
                   </div>
@@ -187,20 +253,20 @@ export default function GyotakuOrderPage() {
                   <label htmlFor="gy-date">
                     Date<span className="jp">釣行日</span><span className="req">*</span>
                   </label>
-                  <input id="gy-date" className="input" type="date" {...bind("date")} />
+                  <input id="gy-date" className="input" type="date" required {...bind("date")} />
                 </div>
                 <div className="field">
                   <label htmlFor="gy-place">
                     Place<span className="jp">釣れた場所</span><span className="req">*</span>
                   </label>
-                  <input id="gy-place" className="input" placeholder="例：壱岐 郷ノ浦沖" {...bind("place")} />
+                  <input id="gy-place" className="input" placeholder="例：壱岐 郷ノ浦沖" required {...bind("place")} />
                   <p className="hint">作品に載る表記そのままで。伏せたい場合は「壱岐沖」など大まかに</p>
                 </div>
                 <div className="field">
                   <label htmlFor="gy-angler">
                     Angler<span className="jp">釣り人の名前</span><span className="req">*</span>
                   </label>
-                  <input id="gy-angler" className="input" placeholder="例：吉田 祐也" {...bind("angler")} />
+                  <input id="gy-angler" className="input" placeholder="例：吉田 祐也" required {...bind("angler")} />
                 </div>
                 <div className="field">
                   <label htmlFor="gy-note">
@@ -216,10 +282,10 @@ export default function GyotakuOrderPage() {
               <p className="eyebrow">Finish</p>
               <h2 className="s-head">仕上げ</h2>
               <div className="form">
-                <div className="field">
-                  <span className="lbl">
+                <fieldset className="field">
+                  <legend className="lbl">
                     Background<span className="jp">背景</span>
-                  </span>
+                  </legend>
                   <div className="choices">
                     {backgrounds.map((b) => (
                       <label key={b.value} className="choice">
@@ -239,11 +305,11 @@ export default function GyotakuOrderPage() {
                       </label>
                     ))}
                   </div>
-                </div>
-                <div className="field">
-                  <span className="lbl">
+                </fieldset>
+                <fieldset className="field">
+                  <legend className="lbl">
                     Options<span className="jp">追加する項目</span>
-                  </span>
+                  </legend>
                   <div className="choices">
                     {options.map((o) => (
                       <OptionChoice
@@ -275,7 +341,7 @@ export default function GyotakuOrderPage() {
                       />
                     ))}
                   </div>
-                </div>
+                </fieldset>
                 <div className="field">
                   <label htmlFor="gy-msg">
                     Message<span className="jp">その他ご要望</span>
@@ -295,13 +361,23 @@ export default function GyotakuOrderPage() {
             <p className="hint">
               背景・オプションの選択で金額が変わります。写真に不足があれば、決済前にLINEでご連絡します。
             </p>
+            {errors.length > 0 && (
+              <div className="form-error" role="alert" tabIndex={-1} ref={errorRef}>
+                <p>入力内容を確認してください</p>
+                <ul>
+                  {errors.map((m) => (
+                    <li key={m}>{m}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="actions">
-              <button type="button" className="btn" onClick={toCheckout}>
+              <button type="submit" className="btn">
                 決済へ進む
               </button>
               <p className="hint">このあと決済画面（Stripe）に移ります。完成データは公式LINEに届きます</p>
             </div>
-          </section>
+          </form>
         ) : (
           <section className="pane deep on-deep">
             <svg className="wave" width="64" height="20" viewBox="0 0 64 20" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">

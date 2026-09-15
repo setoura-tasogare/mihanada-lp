@@ -885,11 +885,15 @@ button{ font-family:inherit; cursor:pointer; }
 .gy-order .unit .input{ padding-right:2.6em; }
 .gy-order .unit span{ position:absolute; right:.2em; bottom:.95em; font-family:var(--latin); font-size:14px; color:var(--ink-faint); letter-spacing:.1em; }
 .gy-order .hint{ font-size:12px; color:var(--ink-faint); letter-spacing:.04em; margin:0; }
+.gy-order fieldset.field{ border:0; margin:0; padding:0; min-width:0; }
+.gy-order fieldset.field > legend{ padding:0; margin-bottom:.5em; }
+.gy-order .block .s-head .req{ color:var(--accent-deep); margin-left:.3em; font-size:.7em; vertical-align:top; }
 
 /* photo */
 .gy-order .drop{ position:relative; display:block; border:1px dashed rgba(43,49,56,.28); background:var(--paper); border-radius:4px; padding:34px 22px; text-align:center; transition:border-color .4s var(--ease), background .4s var(--ease); }
 .gy-order .drop:active, .gy-order .drop.is-over{ border-color:var(--accent); background:#fff; }
 .gy-order .drop input{ position:absolute; inset:0; opacity:0; width:100%; height:100%; cursor:pointer; }
+.gy-order .drop:has(input:focus-visible){ outline:2px solid var(--accent); outline-offset:2px; }
 .gy-order .drop svg{ margin:0 auto 12px; color:var(--accent-deep); }
 .gy-order .drop .t{ font-family:var(--serif); font-size:16px; letter-spacing:.06em; margin:0; }
 .gy-order .drop .s{ font-size:12px; color:var(--ink-faint); margin:.4em 0 0; letter-spacing:.04em; }
@@ -930,6 +934,10 @@ button{ font-family:inherit; cursor:pointer; }
 .gy-order .actions{ margin-top:auto; padding-top:24px; display:flex; flex-direction:column; gap:14px; align-items:stretch; }
 .gy-order .actions .btn{ justify-content:center; }
 .gy-order .actions .hint{ text-align:center; }
+.gy-order .form-error{ margin-top:24px; padding:14px 16px; border:1px solid rgba(168,65,58,.35); background:rgba(168,65,58,.05); border-radius:4px; color:#8f3a33; font-size:13px; line-height:1.8; }
+.gy-order .form-error:focus{ outline:none; }
+.gy-order .form-error p{ margin:0 0 .3em; font-weight:500; }
+.gy-order .form-error ul{ margin:0; padding-left:1.2em; list-style:disc; }
 
 /* done (deep) */
 .gy-order .pane.deep{ background:var(--bg-deep); color:var(--on-deep); justify-content:center; text-align:center; }

@@ -84,6 +84,7 @@ export async function handleLineWebhook(request: Request, env: LineEnv) {
           return;
         }
         if (
+          text === "デジタル魚拓を申し込む" ||
           text === "デジタル魚拓を相談したい" ||
           text === "フィッシュレザーの商品について問い合わせたい" ||
           text === "フィッシュレザーのオーダーメイドを相談したい" ||

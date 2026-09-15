@@ -81,6 +81,17 @@ test("all reachable Flex message buttons lead to a consultation reply", async ()
   assert.ok(replies.find(reply => reply.replyToken === `consult-${[...texts].indexOf("フィッシュレザーを相談したい")}`)?.messages[0].text?.includes("オーダーメイド"));
 });
 
+test("digital gyotaku Flex uses the approved homepage and application labels", () => {
+  const flex = menuResponse("gyotaku") as {
+    contents: { footer: { contents: Array<{ action: Record<string, string> }> } };
+  };
+  const actions = flex.contents.footer.contents.map(button => button.action);
+  assert.deepEqual(actions, [
+    { type: "uri", label: "ホームページを見る", uri: "https://www.mihanada.site/digital-gyotaku" },
+    { type: "message", label: "デジタル魚拓を申し込む", text: "デジタル魚拓を申し込む" },
+  ]);
+});
+
 test("known postbacks respond and unknown postbacks are ignored", async () => {
   replies.length = 0;
   const events = ["gyotaku", "fish_leather", "contact", "unknown"].map(action => ({

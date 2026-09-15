@@ -112,8 +112,8 @@ export function digitalGyotakuFlex(): FlexMessage {
     image: "/images/service-gyotaku.jpg",
     altText: "デジタル魚拓のご案内",
     actions: [
-      button(uri("料金・つくり方を見る", "/digital-gyotaku")),
-      button(message("写真を送って相談する", "デジタル魚拓を相談したい"), true),
+      button(uri("ホームページを見る", "/digital-gyotaku")),
+      button(message("デジタル魚拓を申し込む", "デジタル魚拓を申し込む"), true),
     ],
   });
 }
@@ -192,6 +192,12 @@ export function leatherOrderFlex(): FlexMessage {
 }
 
 export function consultationReply(text: string) {
+  if (text === "デジタル魚拓を申し込む") {
+    return {
+      type: "text",
+      text: "デジタル魚拓のお申し込みですね。\n\n魚全体が分かる写真を、このトークにお送りください。魚種・サイズ・釣った日や場所、仕上がりのご希望も分かる範囲でお知らせください。\n\n内容を確認して、料金と制作の進め方をご案内します。",
+    };
+  }
   if (text === "デジタル魚拓を相談したい") {
     return {
       type: "text",

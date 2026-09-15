@@ -6,12 +6,21 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "LINE_LOGIN_CHANNEL_ID": "2011607510"
+    "LINE_LOGIN_CHANNEL_ID": "2011607510",
+    "LIFF_RETURN_URL": "https://liff.line.me/2011607510-4wOg38uG"
   },
   "kv_namespaces": [
     {
       "binding": "MIHANADA_GYOTAKU_ORDERS",
       "id": "76badcd1d1a34f58bf26dda006a01bbb"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "MIHANADA_GYOTAKU_DB",
+      "database_name": "mihanada-gyotaku",
+      "database_id": "0be6c374-a111-432e-bf2a-e550cf5b0e1e",
+      "migrations_dir": "migrations"
     }
   ],
   "observability": {

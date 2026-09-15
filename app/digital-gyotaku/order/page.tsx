@@ -11,7 +11,6 @@ const ORDER_API_URL =
   process.env.NEXT_PUBLIC_GYOTAKU_ORDER_API_URL ??
   "https://mihanada-line.dzor-xiii.workers.dev/api/gyotaku/orders";
 
-// 料金は仮。本番の金額はサーバ側で line_items を組み立てる（docs/gyotaku-order-flow.md）
 const BASE_PRICE = 3000;
 const MAX_PHOTOS = 3;
 
@@ -112,12 +111,14 @@ export default function GyotakuOrderPage() {
     witness: false,
   });
   const [errors, setErrors] = useState<string[]>([]);
-  const [done, setDone] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [lineStatus, setLineStatus] = useState<"connecting" | "connected" | "error">("connecting");
   const [lineName, setLineName] = useState("");
   const [idToken, setIdToken] = useState("");
   const [orderId, setOrderId] = useState("");
+  const [paymentState, setPaymentState] = useState<
+    "none" | "checking" | "paid" | "pending" | "cancelled" | "error"
+  >("none");
   const errorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -137,6 +138,42 @@ export default function GyotakuOrderPage() {
         setIdToken(token);
         setLineName(typeof decoded?.name === "string" ? decoded.name : "LINEユーザー");
         setLineStatus("connected");
+
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("payment") === "cancelled") {
+          setOrderId(params.get("order_id") ?? "");
+          setPaymentState("cancelled");
+          return;
+        }
+        const sessionId = params.get("session_id");
+        if (params.get("payment") === "success" && sessionId) {
+          setPaymentState("checking");
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            const statusForm = new FormData();
+            statusForm.set("idToken", token);
+            statusForm.set("sessionId", sessionId);
+            const response = await fetch(`${ORDER_API_URL}/status`, {
+              method: "POST",
+              body: statusForm,
+            });
+            const result = (await response.json()) as {
+              orderId?: string;
+              status?: string;
+            };
+            if (!active) return;
+            if (!response.ok || !result.orderId) {
+              setPaymentState("error");
+              return;
+            }
+            setOrderId(result.orderId);
+            if (result.status === "paid") {
+              setPaymentState("paid");
+              return;
+            }
+            if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+          if (active) setPaymentState("pending");
+        }
       } catch {
         if (active) setLineStatus("error");
       }
@@ -200,16 +237,16 @@ export default function GyotakuOrderPage() {
       const result = (await response.json()) as {
         orderId?: string;
         displayName?: string;
+        checkoutUrl?: string;
         error?: string;
       };
-      if (!response.ok || !result.orderId) {
+      if (!response.ok || !result.orderId || !result.checkoutUrl) {
         throw new Error(result.error ?? "注文を送信できませんでした");
       }
       setOrderId(result.orderId);
       if (result.displayName) setLineName(result.displayName);
       releasePhotos();
-      setDone(true);
-      window.scrollTo({ top: 0 });
+      window.location.assign(result.checkoutUrl);
     } catch (error) {
       setErrors([
         error instanceof Error ? error.message : "注文を送信できませんでした",
@@ -222,14 +259,14 @@ export default function GyotakuOrderPage() {
   return (
     <div className="gy-order">
       <div className="shell">
-        {!done && (
+        {paymentState === "none" || paymentState === "cancelled" ? (
           <header className="top">
             <span className="word">MIHANADA</span>
             <span className="stepnum">Gyotaku</span>
           </header>
-        )}
+        ) : null}
 
-        {!done ? (
+        {paymentState === "none" || paymentState === "cancelled" ? (
           <form className="pane" onSubmit={onSubmit} noValidate>
             {/* required は支援技術向けに残し、エラーはブラウザの吹き出しではなく下の一覧にまとめて出す */}
             <h1 className="s-head">
@@ -249,6 +286,12 @@ export default function GyotakuOrderPage() {
                 <span>LINEと連携できませんでした。<a href={LIFF_URL}>LINEから開き直す</a></span>
               )}
             </div>
+            {paymentState === "cancelled" && (
+              <div className="form-error" role="status">
+                <p>決済はキャンセルされました</p>
+                <p>入力内容をご確認のうえ、もう一度お申し込みください。</p>
+              </div>
+            )}
 
             <div className="block">
               <p className="eyebrow">Photo</p>
@@ -433,7 +476,7 @@ export default function GyotakuOrderPage() {
               </span>
             </div>
             <p className="hint">
-              背景・オプションの選択で金額が変わります。写真に不足があれば、決済前にLINEでご連絡します。
+              背景・オプションの選択で金額が変わります。この金額でStripeの安全な決済画面へ進みます。
             </p>
             {errors.length > 0 && (
               <div className="form-error" role="alert" tabIndex={-1} ref={errorRef}>
@@ -447,9 +490,9 @@ export default function GyotakuOrderPage() {
             )}
             <div className="actions">
               <button type="submit" className="btn" disabled={submitting || lineStatus === "connecting"}>
-                {submitting ? "送信しています…" : "この内容で申し込む"}
+                {submitting ? "決済を準備しています…" : "決済に進む"}
               </button>
-              <p className="hint">受付後、注文番号を公式LINEへお送りします。内容を確認してご連絡します</p>
+              <p className="hint">お支払いの確認後、注文番号を公式LINEへお送りします</p>
             </div>
           </form>
         ) : (
@@ -457,19 +500,27 @@ export default function GyotakuOrderPage() {
             <svg className="wave" width="64" height="20" viewBox="0 0 64 20" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
               <path d="M2 10c6-8 12-8 18 0s12 8 18 0 12-8 18 0" />
             </svg>
-            <p className="eyebrow is-center">Order received</p>
-            <h2 className="s-head">お申し込みを受け付けました。</h2>
+            <p className="eyebrow is-center">Payment</p>
+            <h2 className="s-head">
+              {paymentState === "paid"
+                ? "お支払いを確認しました。"
+                : paymentState === "checking"
+                  ? "お支払いを確認しています。"
+                  : paymentState === "pending"
+                    ? "お支払いの確認中です。"
+                    : "注文の確認に時間がかかっています。"}
+            </h2>
             <p className="lead">
-              {lineName}さん、ありがとうございます。
+              {paymentState === "paid" ? `${lineName}さん、ありがとうございます。` : "決済状況は公式LINEでもお知らせします。"}
               <br />
-              内容を確認して、公式LINEでご連絡します。
+              {paymentState === "paid" ? "制作内容を確認して、公式LINEでご連絡します。" : "しばらくしてからLINEをご確認ください。"}
             </p>
             <div className="next">
               <div className="li">
                 <span className="no">01</span>
                 <div>
-                  <div className="t">お申し込み</div>
-                  <div className="s">完了</div>
+                  <div className="t">お支払い</div>
+                  <div className="s">{paymentState === "paid" ? "完了" : "確認中"}</div>
                 </div>
               </div>
               <div className="li now">

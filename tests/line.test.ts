@@ -7,6 +7,11 @@ const POST = (request: Request) => worker.fetch(request, env);
 import { menuResponse } from "../lib/line";
 import { richMenu } from "../lib/line-rich-menu";
 import { verifyLineIdToken } from "../lib/line-login";
+import {
+  calculateGyotakuAmount,
+  createStripeCheckout,
+  verifyStripeWebhookSignature,
+} from "../lib/stripe-checkout";
 
 const oldSecret = process.env.LINE_CHANNEL_SECRET;
 const oldToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -118,12 +123,31 @@ test("LINE ID tokens are verified against the login channel", async () => {
 
 test("verified LIFF orders are saved with their LINE user ID", async () => {
   const values = new Map<string, string | ArrayBuffer>();
+  const databaseWrites: Array<{ query: string; values: unknown[] }> = [];
+  function statement(query: string) {
+    let bound: unknown[] = [];
+    return {
+      bind(...values: unknown[]) { bound = values; return this; },
+      async run() { databaseWrites.push({ query, values: bound }); return { success: true, meta: { changes: 1 } }; },
+      async first() { return null; },
+    };
+  }
   const orderEnv = {
     ...env,
     LINE_LOGIN_CHANNEL_ID: "2011607510",
+    STRIPE_SECRET_KEY: "sk_test_example",
+    LIFF_RETURN_URL: "https://liff.line.me/test",
+    MIHANADA_GYOTAKU_DB: {
+      prepare: statement,
+      async batch(statements: Array<{ run(): Promise<unknown> }>) {
+        await Promise.all(statements.map((item) => item.run()));
+        return [];
+      },
+    },
     MIHANADA_GYOTAKU_ORDERS: {
       async put(key: string, value: string | ArrayBuffer) { values.set(key, value); },
       async delete(key: string) { values.delete(key); },
+      async get(key: string) { return typeof values.get(key) === "string" ? String(values.get(key)) : null; },
     },
   };
   const form = new FormData();
@@ -137,15 +161,15 @@ test("verified LIFF orders are saved with their LINE user ID", async () => {
   form.append("photos", new File(["image"], "madai.jpg", { type: "image/jpeg" }));
 
   const savedFetch = globalThis.fetch;
-  let pushedTo = "";
+  let checkoutBody = "";
   try {
     globalThis.fetch = async (url, init) => {
       if (url === "https://api.line.me/oauth2/v2.1/verify") {
         return Response.json({ sub: "U1234567890", name: "水縹 太郎", aud: "2011607510" });
       }
-      if (url === "https://api.line.me/v2/bot/message/push") {
-        pushedTo = JSON.parse(String(init?.body)).to;
-        return Response.json({});
+      if (url === "https://api.stripe.com/v1/checkout/sessions") {
+        checkoutBody = String(init?.body);
+        return Response.json({ id: "cs_test_order", url: "https://checkout.stripe.com/test" });
       }
       throw new Error(`unexpected request: ${url}`);
     };
@@ -154,15 +178,58 @@ test("verified LIFF orders are saved with their LINE user ID", async () => {
       { method: "POST", body: form, headers: { origin: "https://www.mihanada.site" } },
     ), orderEnv);
     assert.equal(response.status, 201);
-    const result = await response.json() as { orderId: string };
+    const result = await response.json() as { orderId: string; checkoutUrl: string };
     const metadata = JSON.parse(String(values.get(`orders/${result.orderId}/meta.json`)));
     assert.equal(metadata.lineUserId, "U1234567890");
     assert.equal(metadata.species, "真鯛");
-    assert.equal(metadata.confirmationSent, true);
-    assert.equal(pushedTo, "U1234567890");
+    assert.equal(metadata.status, "awaiting_payment");
+    assert.equal(metadata.confirmationSent, false);
+    assert.equal(result.checkoutUrl, "https://checkout.stripe.com/test");
+    assert.match(checkoutBody, /line_items%5B0%5D%5Bprice_data%5D%5Bunit_amount%5D=3000/);
+    assert.equal(databaseWrites.length, 2);
   } finally {
     globalThis.fetch = savedFetch;
   }
+});
+
+test("server pricing and Stripe Checkout line items match every selected option", async () => {
+  assert.equal(calculateGyotakuAmount("wood", new Set(["square", "tackle", "witness"])), 5500);
+  const savedFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (_url, init) => {
+      const body = new URLSearchParams(String(init?.body));
+      const amounts = [...body.entries()]
+        .filter(([key]) => key.endsWith("[unit_amount]"))
+        .map(([, value]) => Number(value));
+      assert.deepEqual(amounts, [3000, 1000, 500, 500, 500]);
+      assert.equal(body.get("client_reference_id"), "GY-TEST");
+      assert.equal(body.get("metadata[line_user_id]"), "U123");
+      return Response.json({ id: "cs_test_123", url: "https://checkout.stripe.com/test" });
+    };
+    await createStripeCheckout({
+      secretKey: "sk_test_example",
+      orderId: "GY-TEST",
+      lineUserId: "U123",
+      species: "真鯛",
+      background: "wood",
+      options: new Set(["square", "tackle", "witness"]),
+      returnUrl: "https://liff.line.me/test",
+    });
+  } finally {
+    globalThis.fetch = savedFetch;
+  }
+});
+
+test("Stripe webhook signatures cover the exact raw request body", async () => {
+  const payload = JSON.stringify({ id: "evt_123", type: "checkout.session.completed" });
+  const timestamp = 1_800_000_000;
+  const signature = crypto.createHmac("sha256", "whsec_test")
+    .update(`${timestamp}.${payload}`)
+    .digest("hex");
+  const header = `t=${timestamp},v1=${signature}`;
+  assert.equal(await verifyStripeWebhookSignature(payload, header, "whsec_test", timestamp), true);
+  assert.equal(await verifyStripeWebhookSignature(`${payload} `, header, "whsec_test", timestamp), false);
+  assert.equal(await verifyStripeWebhookSignature(payload, header, "whsec_test", timestamp + 301), false);
 });
 
 test("known postbacks respond and unknown postbacks are ignored", async () => {

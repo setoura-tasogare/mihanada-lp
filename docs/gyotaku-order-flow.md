@@ -10,9 +10,8 @@
 2. LIFF でフォームを開く（`/digital-gyotaku/order`）
 3. 写真・魚の情報・仕上げを入力 →「決済へ進む」（クライアントとサーバの両方で必須項目を検証）
 4. Cloudflare WorkerでLINE IDトークンを検証し、注文と写真をCloudflare KVへ保存する
-5. 注文番号を同じLINEユーザーのトークへpushする
-6. （次段階）サーバで注文を `awaiting_payment` に更新し、Stripe Checkout へ
-7. Stripe Webhook で入金を確認したら注文を `paid` に確定し、LINE に「お支払いを確認しました」を push（詳細は「決済・返金の状態遷移」「Webhook の冪等性」）
+5. Workerが表示内容を再計算し、注文を `awaiting_payment` にしてStripe Checkoutへ移動する
+6. Stripe Webhookで入金を確認したら注文を `paid` に確定し、同じLINEユーザーへ注文番号と入金確認をpushする
 8. 社内で制作（gyotaku ツール）
 9. 完成データを LINE で push 納品
 
@@ -28,7 +27,7 @@
 ## Stripe との受け渡し
 - Checkout Session 作成時に `client_reference_id = order.id`、`metadata = { line_user_id, order_id }` を渡す
 - Webhook 側は metadata だけで「誰の注文か」を引ける。完了通知の push もここから
-- 料金: 基本 ¥3,000（仮）、背景 淡彩/木目 +¥1,000、スクエア/タックル欄/現認者欄 各 +¥500。line_items はサーバ側で組み立てる（クライアントの金額は信用しない）
+- 料金: 基本 ¥3,000、背景 淡彩/木目 +¥1,000、スクエア/タックル欄/現認者欄 各 +¥500。line_items はサーバ側で組み立てる（クライアントの金額は信用しない）
 - 決済手段はまずカード（Apple Pay / Google Pay 含む）に限定する。コンビニ払いなど入金が後になる手段を足す場合は、下の非同期イベントの処理を必ず入れる
 
 ## 決済・返金の状態遷移
@@ -53,7 +52,7 @@ Stripe は同じイベントを複数回送ることがある（再送・順不�
 - **イベントの処理済み記録**: `stripe_events(event_id primary key, type, received_at)` に `event.id` を insert してから処理する。重複キーで失敗したら処理済みとして 200 を返す
 - **Session の一意制約**: `gyotaku_orders.stripe_session_id` に UNIQUE 制約を付ける
 - **条件付き更新**: 上の状態遷移のとおり、今の状態を条件にした update にする。更新件数が 0 件なら後続処理（push など）をしない
-- **LINE push は outbox 経由**: 状態更新と同じトランザクションで `line_push_outbox(id, order_id, kind, sent_at null)` に積み、別の処理で送る。`(order_id, kind)` に UNIQUE を付け、送信できたら `sent_at` を埋める。Webhook の中で直接 push しない
+- **LINE push の一回性**: D1の `confirmation_sent_at` を条件付き更新して送信権を確保する。送信失敗時だけ値を戻し、Stripe再送で再試行できるようにする
 - 署名検証（`Stripe-Signature`）に失敗したリクエストは処理しない
 
 ## 現在の保存先（Cloudflare KV）
@@ -63,6 +62,14 @@ Stripe は同じイベントを複数回送ることがある（再送・順不�
 - 写真: `orders/{orderId}/photos/{number}-{filename}`
 - 注文JSONに `lineUserId`、`lineDisplayName`、入力内容、金額、写真キー、LINE確認送信結果を保存する
 - 画像は1枚10MB以下、最大3枚。KVは現在の小規模受付用で、決済・管理画面の実装時にD1またはSupabaseへ索引を移す
+
+## 現在の注文索引（Cloudflare D1）
+
+- Database: `mihanada-gyotaku`
+- `gyotaku_orders`: LINEユーザー、金額、Stripe Session、決済状態、LINE通知状態
+- `stripe_events`: StripeイベントIDを主キーとして再送を記録
+- 注文内容と写真はKV、検索・決済状態はD1に保存する
+- StripeシークレットはWorker Secretにのみ保存し、Gitやブラウザには公開しない
 
 ## 将来のデータ（Supabase 案）
 `gyotaku_orders`
@@ -91,5 +98,5 @@ Stripe は同じイベントを複数回送ることがある（再送・順不�
 ## フェーズ
 - Phase 1（この PR）: フォーム UI（クライアント側の必須項目チェックを含む）
 - Phase 2: LIFF 組み込み、Cloudflare KV保存、写真アップロード、サーバ側の入力検証（完了）
-- Phase 3: Stripe Checkout + Webhook（状態遷移・冪等性・outbox）、決済完了 push
+- Phase 3: Stripe Checkout + Webhook（状態遷移・冪等性）、決済完了 push（実装済み）
 - Phase 4: 写真品質チェック、納品 push、注文一覧（社内向け）

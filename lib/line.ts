@@ -6,6 +6,7 @@ type FlexMessage = {
 };
 
 const siteUrl = "https://www.mihanada.site";
+const gyotakuOrderLiffUrl = "https://liff.line.me/2011607510-4wOg38uG";
 
 const colors = {
   paper: "#F4F1EA",
@@ -112,8 +113,8 @@ export function digitalGyotakuFlex(): FlexMessage {
     image: "/images/service-gyotaku.jpg",
     altText: "デジタル魚拓のご案内",
     actions: [
-      button(uri("料金・つくり方を見る", "/digital-gyotaku")),
-      button(message("写真を送って相談する", "デジタル魚拓を相談したい"), true),
+      button(uri("ホームページを見る", "/digital-gyotaku")),
+      button(uri("デジタル魚拓を申し込む", gyotakuOrderLiffUrl), true),
     ],
   });
 }

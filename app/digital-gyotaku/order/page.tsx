@@ -4,6 +4,12 @@ import { useEffect, useRef, useState } from "react";
 
 const LINE_URL =
   process.env.NEXT_PUBLIC_LINE_URL ?? "https://lin.ee/xoSEDWK";
+const LIFF_ID =
+  process.env.NEXT_PUBLIC_LIFF_ID ?? "2011607510-4wOg38uG";
+const LIFF_URL = `https://liff.line.me/${LIFF_ID}`;
+const ORDER_API_URL =
+  process.env.NEXT_PUBLIC_GYOTAKU_ORDER_API_URL ??
+  "https://mihanada-line.dzor-xiii.workers.dev/api/gyotaku/orders";
 
 // 料金は仮。本番の金額はサーバ側で line_items を組み立てる（docs/gyotaku-order-flow.md）
 const BASE_PRICE = 3000;
@@ -95,11 +101,6 @@ function usePhotoPreviews(max: number) {
 }
 
 export default function GyotakuOrderPage() {
-  // TODO(Phase 2): LIFF 組み込み
-  // liff.init({ liffId }) → liff.getProfile() で userId / displayName を取得し、ここで state に持つ。
-  // 注文レコードの line_user_id / line_display_name と Stripe の metadata に渡す。
-  // const { userId, displayName } = useLiffProfile();
-
   const { photos, replace: replacePhotos, release: releasePhotos } =
     usePhotoPreviews(MAX_PHOTOS);
   const [dragOver, setDragOver] = useState(false);
@@ -112,7 +113,39 @@ export default function GyotakuOrderPage() {
   });
   const [errors, setErrors] = useState<string[]>([]);
   const [done, setDone] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [lineStatus, setLineStatus] = useState<"connecting" | "connected" | "error">("connecting");
+  const [lineName, setLineName] = useState("");
+  const [idToken, setIdToken] = useState("");
+  const [orderId, setOrderId] = useState("");
   const errorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    async function connectLine() {
+      try {
+        const { default: liff } = await import("@line/liff");
+        await liff.init({ liffId: LIFF_ID });
+        if (!liff.isLoggedIn()) {
+          liff.login({ redirectUri: window.location.href });
+          return;
+        }
+        const token = liff.getIDToken();
+        if (!token) throw new Error("LINE ID token is unavailable");
+        const decoded = liff.getDecodedIDToken();
+        if (!active) return;
+        setIdToken(token);
+        setLineName(typeof decoded?.name === "string" ? decoded.name : "LINEユーザー");
+        setLineStatus("connected");
+      } catch {
+        if (active) setLineStatus("error");
+      }
+    }
+    void connectLine();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // 送信のたびに errors は新しい配列になるので、エラーがあれば毎回一覧へフォーカスを移す
   useEffect(() => {
@@ -142,16 +175,48 @@ export default function GyotakuOrderPage() {
     replacePhotos(files);
   }
 
-  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const found = validate(values, photos.length);
+    if (lineStatus !== "connected" || !idToken) {
+      found.push("LINEとの連携を確認できません。LINEから開き直してください");
+    }
     setErrors(found);
     if (found.length > 0) return;
-    // UI のみ。Phase 3 でここを「サーバで注文作成 → Stripe Checkout へリダイレクト」に置き換え、
-    // 下の完了画面は決済後の戻り先として表示する（写真のアップロードはその前に済ませる）
-    releasePhotos();
-    setDone(true);
-    window.scrollTo({ top: 0 });
+
+    setSubmitting(true);
+    try {
+      const form = new FormData(e.currentTarget);
+      form.set("idToken", idToken);
+      form.set("background", background);
+      form.delete("photos");
+      photos.forEach((photo) => form.append("photos", photo.file));
+      form.delete("options");
+      for (const [key, checked] of Object.entries(selected)) {
+        if (checked) form.append("options", key);
+      }
+
+      const response = await fetch(ORDER_API_URL, { method: "POST", body: form });
+      const result = (await response.json()) as {
+        orderId?: string;
+        displayName?: string;
+        error?: string;
+      };
+      if (!response.ok || !result.orderId) {
+        throw new Error(result.error ?? "注文を送信できませんでした");
+      }
+      setOrderId(result.orderId);
+      if (result.displayName) setLineName(result.displayName);
+      releasePhotos();
+      setDone(true);
+      window.scrollTo({ top: 0 });
+    } catch (error) {
+      setErrors([
+        error instanceof Error ? error.message : "注文を送信できませんでした",
+      ]);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -175,6 +240,15 @@ export default function GyotakuOrderPage() {
             <p className="lead">
               写真と釣行の記録をもとに、和紙の質感を生かしたデジタル魚拓をつくります。送っていただいたあとは、こちらで仕立ててお届けします。
             </p>
+            <div className={`line-status is-${lineStatus}`} role="status">
+              {lineStatus === "connected" ? (
+                <span><strong>{lineName}</strong>さんのLINEと連携済みです</span>
+              ) : lineStatus === "connecting" ? (
+                <span>LINEと連携しています…</span>
+              ) : (
+                <span>LINEと連携できませんでした。<a href={LIFF_URL}>LINEから開き直す</a></span>
+              )}
+            </div>
 
             <div className="block">
               <p className="eyebrow">Photo</p>
@@ -372,10 +446,10 @@ export default function GyotakuOrderPage() {
               </div>
             )}
             <div className="actions">
-              <button type="submit" className="btn">
-                決済へ進む
+              <button type="submit" className="btn" disabled={submitting || lineStatus === "connecting"}>
+                {submitting ? "送信しています…" : "この内容で申し込む"}
               </button>
-              <p className="hint">このあと決済画面（Stripe）に移ります。完成データは公式LINEに届きます</p>
+              <p className="hint">受付後、注文番号を公式LINEへお送りします。内容を確認してご連絡します</p>
             </div>
           </form>
         ) : (
@@ -383,18 +457,18 @@ export default function GyotakuOrderPage() {
             <svg className="wave" width="64" height="20" viewBox="0 0 64 20" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
               <path d="M2 10c6-8 12-8 18 0s12 8 18 0 12-8 18 0" />
             </svg>
-            <p className="eyebrow is-center">Payment complete</p>
-            <h2 className="s-head">お支払いを確認しました。</h2>
+            <p className="eyebrow is-center">Order received</p>
+            <h2 className="s-head">お申し込みを受け付けました。</h2>
             <p className="lead">
-              ここからは、こちらの仕事です。
+              {lineName}さん、ありがとうございます。
               <br />
-              できあがったら公式LINEにお届けします。
+              内容を確認して、公式LINEでご連絡します。
             </p>
             <div className="next">
               <div className="li">
                 <span className="no">01</span>
                 <div>
-                  <div className="t">お申し込み・お支払い</div>
+                  <div className="t">お申し込み</div>
                   <div className="s">完了</div>
                 </div>
               </div>
@@ -418,8 +492,7 @@ export default function GyotakuOrderPage() {
                 LINEにもどる
               </a>
             </div>
-            {/* TODO(Phase 3): Webhook で確定した注文番号を表示する。現在はモックの固定値 */}
-            <p className="foot">注文番号　GY-260915-014</p>
+            <p className="foot">注文番号　{orderId}</p>
           </section>
         )}
       </div>

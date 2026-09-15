@@ -5,6 +5,15 @@
   "compatibility_date": "2026-09-13",
   "workers_dev": true,
   "preview_urls": false,
+  "vars": {
+    "LINE_LOGIN_CHANNEL_ID": "2011607510"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "MIHANADA_GYOTAKU_ORDERS",
+      "id": "76badcd1d1a34f58bf26dda006a01bbb"
+    }
+  ],
   "observability": {
     "enabled": false
   }

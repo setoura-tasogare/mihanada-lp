@@ -6,6 +6,7 @@ const env = { LINE_CHANNEL_SECRET: "test-secret", LINE_CHANNEL_ACCESS_TOKEN: "te
 const POST = (request: Request) => worker.fetch(request, env);
 import { menuResponse } from "../lib/line";
 import { richMenu } from "../lib/line-rich-menu";
+import { verifyLineIdToken } from "../lib/line-login";
 
 const oldSecret = process.env.LINE_CHANNEL_SECRET;
 const oldToken = process.env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -79,6 +80,89 @@ test("all reachable Flex message buttons lead to a consultation reply", async ()
   assert.equal(replies.length, texts.size);
   assert.ok(replies.every(reply => reply.messages[0].type === "text"));
   assert.ok(replies.find(reply => reply.replyToken === `consult-${[...texts].indexOf("フィッシュレザーを相談したい")}`)?.messages[0].text?.includes("オーダーメイド"));
+});
+
+test("digital gyotaku Flex opens the LIFF order form", () => {
+  const flex = menuResponse("gyotaku") as {
+    contents: { footer: { contents: Array<{ action: Record<string, string> }> } };
+  };
+  const actions = flex.contents.footer.contents.map(button => button.action);
+  assert.deepEqual(actions, [
+    { type: "uri", label: "ホームページを見る", uri: "https://www.mihanada.site/digital-gyotaku" },
+    { type: "uri", label: "デジタル魚拓を申し込む", uri: "https://liff.line.me/2011607510-4wOg38uG" },
+  ]);
+});
+
+test("LINE ID tokens are verified against the login channel", async () => {
+  const verified = await verifyLineIdToken("signed-token", "2011607510", async () =>
+    Response.json({
+      sub: "U1234567890",
+      name: "水縹 太郎",
+      picture: "https://profile.line-scdn.net/example",
+      aud: "2011607510",
+    }),
+  );
+  assert.deepEqual(verified, {
+    userId: "U1234567890",
+    displayName: "水縹 太郎",
+    pictureUrl: "https://profile.line-scdn.net/example",
+  });
+
+  assert.equal(
+    await verifyLineIdToken("signed-token", "wrong-channel", async () =>
+      Response.json({ sub: "U1234567890", aud: "2011607510" }),
+    ),
+    undefined,
+  );
+});
+
+test("verified LIFF orders are saved with their LINE user ID", async () => {
+  const values = new Map<string, string | ArrayBuffer>();
+  const orderEnv = {
+    ...env,
+    LINE_LOGIN_CHANNEL_ID: "2011607510",
+    MIHANADA_GYOTAKU_ORDERS: {
+      async put(key: string, value: string | ArrayBuffer) { values.set(key, value); },
+      async delete(key: string) { values.delete(key); },
+    },
+  };
+  const form = new FormData();
+  form.set("idToken", "signed-token");
+  form.set("species", "真鯛");
+  form.set("length", "52");
+  form.set("date", "2026-09-15");
+  form.set("place", "壱岐沖");
+  form.set("angler", "水縹 太郎");
+  form.set("background", "mono");
+  form.append("photos", new File(["image"], "madai.jpg", { type: "image/jpeg" }));
+
+  const savedFetch = globalThis.fetch;
+  let pushedTo = "";
+  try {
+    globalThis.fetch = async (url, init) => {
+      if (url === "https://api.line.me/oauth2/v2.1/verify") {
+        return Response.json({ sub: "U1234567890", name: "水縹 太郎", aud: "2011607510" });
+      }
+      if (url === "https://api.line.me/v2/bot/message/push") {
+        pushedTo = JSON.parse(String(init?.body)).to;
+        return Response.json({});
+      }
+      throw new Error(`unexpected request: ${url}`);
+    };
+    const response = await worker.fetch(new Request(
+      "https://worker.example/api/gyotaku/orders",
+      { method: "POST", body: form, headers: { origin: "https://www.mihanada.site" } },
+    ), orderEnv);
+    assert.equal(response.status, 201);
+    const result = await response.json() as { orderId: string };
+    const metadata = JSON.parse(String(values.get(`orders/${result.orderId}/meta.json`)));
+    assert.equal(metadata.lineUserId, "U1234567890");
+    assert.equal(metadata.species, "真鯛");
+    assert.equal(metadata.confirmationSent, true);
+    assert.equal(pushedTo, "U1234567890");
+  } finally {
+    globalThis.fetch = savedFetch;
+  }
 });
 
 test("known postbacks respond and unknown postbacks are ignored", async () => {

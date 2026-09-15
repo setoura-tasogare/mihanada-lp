@@ -9,17 +9,19 @@
 1. 公式LINE のリッチメニュー →「注文する」
 2. LIFF でフォームを開く（`/digital-gyotaku/order`）
 3. 写真・魚の情報・仕上げを入力 →「決済へ進む」（クライアントとサーバの両方で必須項目を検証）
-4. サーバで注文を `awaiting_payment` で作成し、Stripe Checkout へ
-5. Stripe Webhook で入金を確認したら注文を `paid` に確定し、LINE に「お支払いを確認しました」を push（詳細は「決済・返金の状態遷移」「Webhook の冪等性」）
-6. 社内で制作（gyotaku ツール）
-7. 完成データを LINE で push 納品
+4. Cloudflare WorkerでLINE IDトークンを検証し、注文と写真をCloudflare KVへ保存する
+5. 注文番号を同じLINEユーザーのトークへpushする
+6. （次段階）サーバで注文を `awaiting_payment` に更新し、Stripe Checkout へ
+7. Stripe Webhook で入金を確認したら注文を `paid` に確定し、LINE に「お支払いを確認しました」を push（詳細は「決済・返金の状態遷移」「Webhook の冪等性」）
+8. 社内で制作（gyotaku ツール）
+9. 完成データを LINE で push 納品
 
 ## LINE ユーザーの特定
 - フォームは LIFF アプリとして登録し、LIFF URL（`https://liff.line.me/{liffId}`）で開かせる
   - LINE アプリ内で開けば自動でログイン済みになり、`liff.getProfile()` が使える
   - 外部ブラウザで LIFF URL を開いた場合も、`liff.login()` でログインすればプロフィールは取れる
   - `/digital-gyotaku/order` を LIFF を通さず直接開いた場合は LIFF の初期化もログインもされないので、userId は取れない。直接アクセス時は LIFF URL へ誘導する
-- `liff.getProfile()` で `userId`（`U` 始まりの固定ID）と `displayName` を取得し、注文レコードに保存する
+- 画面では `liff.getIDToken()` を取得してWorkerへ送る。WorkerはLINEの `POST /oauth2/v2.1/verify` で検証し、返された `sub`（`U` 始まりの固定ID）と `name` を注文に保存する
 - userId は**プロバイダー単位**で決まる。同じユーザーでも、同一プロバイダー配下のチャネル同士なら userId は一致し、プロバイダーが違うと一致しない。**LIFF と Messaging API チャネルは同じプロバイダー配下に置く**こと。そうしないと Webhook で受ける userId と注文の userId が一致しない
 - 納品時の push は既存の `lib/line-webhook` / Cloudflare Workers の基盤に乗せる
 
@@ -54,7 +56,15 @@ Stripe は同じイベントを複数回送ることがある（再送・順不�
 - **LINE push は outbox 経由**: 状態更新と同じトランザクションで `line_push_outbox(id, order_id, kind, sent_at null)` に積み、別の処理で送る。`(order_id, kind)` に UNIQUE を付け、送信できたら `sent_at` を埋める。Webhook の中で直接 push しない
 - 署名検証（`Stripe-Signature`）に失敗したリクエストは処理しない
 
-## データ（Supabase 案）
+## 現在の保存先（Cloudflare KV）
+
+- Namespace: `MIHANADA_GYOTAKU_ORDERS`
+- 注文: `orders/{orderId}/meta.json`
+- 写真: `orders/{orderId}/photos/{number}-{filename}`
+- 注文JSONに `lineUserId`、`lineDisplayName`、入力内容、金額、写真キー、LINE確認送信結果を保存する
+- 画像は1枚10MB以下、最大3枚。KVは現在の小規模受付用で、決済・管理画面の実装時にD1またはSupabaseへ索引を移す
+
+## 将来のデータ（Supabase 案）
 `gyotaku_orders`
 - id, created_at
 - line_user_id, line_display_name
@@ -80,6 +90,6 @@ Stripe は同じイベントを複数回送ることがある（再送・順不�
 
 ## フェーズ
 - Phase 1（この PR）: フォーム UI（クライアント側の必須項目チェックを含む）
-- Phase 2: LIFF 組み込み、Supabase 保存、写真アップロード、サーバ側の入力検証
+- Phase 2: LIFF 組み込み、Cloudflare KV保存、写真アップロード、サーバ側の入力検証（完了）
 - Phase 3: Stripe Checkout + Webhook（状態遷移・冪等性・outbox）、決済完了 push
 - Phase 4: 写真品質チェック、納品 push、注文一覧（社内向け）

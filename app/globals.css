@@ -867,6 +867,10 @@ button{ font-family:inherit; cursor:pointer; }
 .gy-order .s-head{ font-size:clamp(23px,6.4vw,30px); line-height:1.5; }
 .gy-order h1.s-head{ margin-top:14px; }
 .gy-order .lead{ font-size:14.5px; max-width:40ch; margin:1.1em 0 0; }
+.gy-order .line-status{ margin-top:20px; padding:12px 14px; border:1px solid var(--line-soft); border-radius:4px; background:var(--paper); font-size:12.5px; color:var(--ink-soft); line-height:1.7; }
+.gy-order .line-status.is-connected{ border-color:rgba(110,159,192,.65); }
+.gy-order .line-status.is-error{ border-color:rgba(168,65,58,.35); color:#8f3a33; }
+.gy-order .line-status a{ color:inherit; text-decoration:underline; text-underline-offset:.2em; }
 .gy-order .eyebrow{ font-size:13px; margin:0 0 1.2em; }
 .gy-order .eyebrow::before{ width:24px; }
 .gy-order .block{ padding-top:clamp(36px,9vw,48px); margin-top:clamp(36px,9vw,48px); border-top:1px solid var(--line-soft); }
@@ -933,6 +937,7 @@ button{ font-family:inherit; cursor:pointer; }
 .gy-order .total + .hint{ margin-top:8px; }
 .gy-order .actions{ margin-top:auto; padding-top:24px; display:flex; flex-direction:column; gap:14px; align-items:stretch; }
 .gy-order .actions .btn{ justify-content:center; }
+.gy-order .actions .btn:disabled{ cursor:wait; opacity:.58; }
 .gy-order .actions .hint{ text-align:center; }
 .gy-order .form-error{ margin-top:24px; padding:14px 16px; border:1px solid rgba(168,65,58,.35); background:rgba(168,65,58,.05); border-radius:4px; color:#8f3a33; font-size:13px; line-height:1.8; }
 .gy-order .form-error:focus{ outline:none; }

@@ -52,7 +52,7 @@ Stripe は同じイベントを複数回送ることがある（再送・順不�
 - **イベントの処理済み記録**: `stripe_events(event_id primary key, type, received_at)` に `event.id` を insert してから処理する。重複キーで失敗したら処理済みとして 200 を返す
 - **Session の一意制約**: `gyotaku_orders.stripe_session_id` に UNIQUE 制約を付ける
 - **条件付き更新**: 上の状態遷移のとおり、今の状態を条件にした update にする。更新件数が 0 件なら後続処理（push など）をしない
-- **LINE push の一回性**: D1の `confirmation_sent_at` を条件付き更新して送信権を確保する。送信失敗時だけ値を戻し、Stripe再送で再試行できるようにする
+- **LINE push の再送**: 注文ごとに固定の `X-Line-Retry-Key` を付け、LINE側の重複抑止（24時間）を利用する。送信が受理された後にD1の `confirmation_sent_at` を記録する。通信失敗時はStripeへ502を返して再試行する。24時間を超える障害では通知履歴の照合が必要。
 - 署名検証（`Stripe-Signature`）に失敗したリクエストは処理しない
 
 ## 現在の保存先（Cloudflare KV）
@@ -60,7 +60,7 @@ Stripe は同じイベントを複数回送ることがある（再送・順不�
 - Namespace: `MIHANADA_GYOTAKU_ORDERS`
 - 注文: `orders/{orderId}/meta.json`
 - 写真: `orders/{orderId}/photos/{number}-{filename}`
-- 注文JSONに `lineUserId`、`lineDisplayName`、入力内容、金額、写真キー、LINE確認送信結果を保存する
+- 注文JSONに `lineUserId`、`lineDisplayName`、入力内容、金額、写真キーを保存する。決済状態とLINE通知状態はD1を正とする。
 - 画像は1枚10MB以下、最大3枚。KVは現在の小規模受付用で、決済・管理画面の実装時にD1またはSupabaseへ索引を移す
 
 ## 現在の注文索引（Cloudflare D1）

@@ -88,11 +88,17 @@ async function pushOrderConfirmation(
   species: string,
   token: string,
 ) {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`payment-confirmed:${orderId}`)));
+  digest[6] = (digest[6] & 15) | 80;
+  digest[8] = (digest[8] & 63) | 128;
+  const hex = Array.from(digest.slice(0, 16), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const retryKey = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
   const response = await fetch("https://api.line.me/v2/bot/message/push", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      "X-Line-Retry-Key": retryKey,
     },
     body: JSON.stringify({
       to: userId,
@@ -104,7 +110,7 @@ async function pushOrderConfirmation(
       ],
     }),
   });
-  return response.ok;
+  return response.ok || (response.status === 409 && response.headers.has("x-line-accepted-request-id"));
 }
 
 async function handleOrder(request: Request, env: WorkerEnv) {
@@ -172,6 +178,7 @@ async function handleOrder(request: Request, env: WorkerEnv) {
 
   const orderId = createOrderId();
   const photoKeys: string[] = [];
+  let checkoutAttempted = false;
   try {
     for (const [index, photo] of photos.entries()) {
       const key = `orders/${orderId}/photos/${index + 1}-${safeFilename(photo.name)}`;
@@ -184,7 +191,6 @@ async function handleOrder(request: Request, env: WorkerEnv) {
     const order = {
       id: orderId,
       createdAt: new Date().toISOString(),
-      status: "draft",
       lineUserId: identity.userId,
       lineDisplayName: identity.displayName,
       species,
@@ -206,7 +212,6 @@ async function handleOrder(request: Request, env: WorkerEnv) {
       message: field(form, "msg", 1000),
       photoKeys,
       amountJpy: calculateGyotakuAmount(background as GyotakuBackground, options),
-      confirmationSent: false,
     };
 
     const metaKey = `orders/${orderId}/meta.json`;
@@ -214,7 +219,7 @@ async function handleOrder(request: Request, env: WorkerEnv) {
     await db.prepare(
       `INSERT INTO gyotaku_orders
         (id, line_user_id, line_display_name, species, amount_jpy, status, metadata_key, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'draft', ?, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, ?, ?, 'awaiting_payment', ?, datetime('now'), datetime('now'))`,
     ).bind(
       orderId,
       identity.userId,
@@ -224,6 +229,7 @@ async function handleOrder(request: Request, env: WorkerEnv) {
       metaKey,
     ).run();
 
+    checkoutAttempted = true;
     const checkout = await createStripeCheckout({
       secretKey: env.STRIPE_SECRET_KEY,
       orderId,
@@ -235,17 +241,14 @@ async function handleOrder(request: Request, env: WorkerEnv) {
     });
     await db.prepare(
       `UPDATE gyotaku_orders
-       SET status = 'awaiting_payment', stripe_session_id = ?, updated_at = datetime('now')
-       WHERE id = ? AND status = 'draft'`,
+       SET stripe_session_id = ?, updated_at = datetime('now')
+       WHERE id = ? AND stripe_session_id IS NULL`,
     ).bind(checkout.id, orderId).run();
-    await orderStore.put(
-      metaKey,
-      JSON.stringify({ ...order, status: "awaiting_payment", stripeSessionId: checkout.id }),
-    );
 
     return json({ orderId, displayName: identity.displayName, checkoutUrl: checkout.url }, 201, origin);
   } catch {
-    await Promise.allSettled(photoKeys.map((key) => orderStore.delete(key)));
+    // Preserve recoverable order data if Stripe may already have created a session.
+    if (!checkoutAttempted) await Promise.allSettled(photoKeys.map((key) => orderStore.delete(key)));
     return json({ error: "注文を保存できませんでした。時間をおいてお試しください" }, 500, origin);
   }
 }
@@ -276,6 +279,7 @@ type StripeEvent = {
       id?: string;
       client_reference_id?: string | null;
       amount_total?: number | null;
+      currency?: string;
       payment_status?: string;
       payment_intent?: string | null;
     };
@@ -297,7 +301,7 @@ async function handleStripeWebhook(request: Request, env: WorkerEnv) {
   } catch {
     return Response.json({ error: "Invalid payload" }, { status: 400 });
   }
-  if (!event.id || !event.type) return Response.json({ error: "Invalid event" }, { status: 400 });
+  if (!event || !event.id || !event.type) return Response.json({ error: "Invalid event" }, { status: 400 });
 
   const session = event.data?.object;
   const sessionId = session?.id ?? "";
@@ -313,7 +317,7 @@ async function handleStripeWebhook(request: Request, env: WorkerEnv) {
       "INSERT OR IGNORE INTO stripe_events (event_id, type, received_at) VALUES (?, ?, datetime('now'))",
     ).bind(event.id, event.type),
   ];
-  if (shouldMarkPaid && sessionId && Number.isInteger(amountTotal)) {
+  if (shouldMarkPaid && sessionId && session?.currency === "jpy" && Number.isInteger(amountTotal)) {
     statements.push(env.MIHANADA_GYOTAKU_DB.prepare(
       `UPDATE gyotaku_orders
        SET status = 'paid', stripe_session_id = ?, stripe_payment_intent = ?, updated_at = datetime('now')
@@ -335,24 +339,16 @@ async function handleStripeWebhook(request: Request, env: WorkerEnv) {
        FROM gyotaku_orders WHERE stripe_session_id = ? AND status = 'paid' AND confirmation_sent_at IS NULL`,
     ).bind(sessionId).first<{ id: string; lineUserId: string; species: string; metadataKey: string }>();
     if (order) {
-      const claimed = await env.MIHANADA_GYOTAKU_DB.prepare(
-        "UPDATE gyotaku_orders SET confirmation_sent_at = datetime('now') WHERE id = ? AND confirmation_sent_at IS NULL",
-      ).bind(order.id).run();
-      if ((claimed.meta?.changes ?? 0) === 1) {
+      try {
         const sent = await pushOrderConfirmation(order.lineUserId, order.id, order.species, env.LINE_CHANNEL_ACCESS_TOKEN);
         if (!sent) {
-          await env.MIHANADA_GYOTAKU_DB.prepare(
-            "UPDATE gyotaku_orders SET confirmation_sent_at = NULL WHERE id = ?",
-          ).bind(order.id).run();
           return Response.json({ error: "LINE push failed" }, { status: 502 });
         }
-        const stored = await env.MIHANADA_GYOTAKU_ORDERS.get(order.metadataKey);
-        if (stored) {
-          await env.MIHANADA_GYOTAKU_ORDERS.put(
-            order.metadataKey,
-            JSON.stringify({ ...JSON.parse(stored), status: "paid", confirmationSent: true }),
-          );
-        }
+        await env.MIHANADA_GYOTAKU_DB.prepare(
+          "UPDATE gyotaku_orders SET confirmation_sent_at = datetime('now') WHERE id = ? AND confirmation_sent_at IS NULL",
+        ).bind(order.id).run();
+      } catch {
+        return Response.json({ error: "LINE push failed" }, { status: 502 });
       }
     }
   }

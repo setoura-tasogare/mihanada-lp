@@ -145,7 +145,10 @@ test("verified LIFF orders are saved with their LINE user ID", async () => {
       },
     },
     MIHANADA_GYOTAKU_ORDERS: {
-      async put(key: string, value: string | ArrayBuffer) { values.set(key, value); },
+      async put(key: string, value: string | ArrayBuffer) {
+        assert.equal(values.has(key), false, "avoid repeated KV writes within one second");
+        values.set(key, value);
+      },
       async delete(key: string) { values.delete(key); },
       async get(key: string) { return typeof values.get(key) === "string" ? String(values.get(key)) : null; },
     },
@@ -182,8 +185,8 @@ test("verified LIFF orders are saved with their LINE user ID", async () => {
     const metadata = JSON.parse(String(values.get(`orders/${result.orderId}/meta.json`)));
     assert.equal(metadata.lineUserId, "U1234567890");
     assert.equal(metadata.species, "真鯛");
-    assert.equal(metadata.status, "awaiting_payment");
-    assert.equal(metadata.confirmationSent, false);
+    assert.equal(metadata.amountJpy, 3000);
+    assert.match(databaseWrites[0].query, /awaiting_payment/);
     assert.equal(result.checkoutUrl, "https://checkout.stripe.com/test");
     assert.match(checkoutBody, /line_items%5B0%5D%5Bprice_data%5D%5Bunit_amount%5D=3000/);
     assert.equal(databaseWrites.length, 2);
@@ -230,6 +233,23 @@ test("Stripe webhook signatures cover the exact raw request body", async () => {
   assert.equal(await verifyStripeWebhookSignature(payload, header, "whsec_test", timestamp), true);
   assert.equal(await verifyStripeWebhookSignature(`${payload} `, header, "whsec_test", timestamp), false);
   assert.equal(await verifyStripeWebhookSignature(payload, header, "whsec_test", timestamp + 301), false);
+});
+
+test("Stripe webhook rejects malformed signed payloads and invalid signatures", async () => {
+  const db = { prepare() { throw new Error("must not access DB"); }, async batch() { return []; } };
+  const webhookEnv = { ...env, STRIPE_WEBHOOK_SECRET: "whsec_test", MIHANADA_GYOTAKU_DB: db };
+  const timestamp = Math.floor(Date.now() / 1000);
+  for (const payload of ["null", "{", "{}"] ) {
+    const signature = crypto.createHmac("sha256", "whsec_test").update(`${timestamp}.${payload}`).digest("hex");
+    const response = await worker.fetch(new Request("https://example.com/api/stripe/webhook", {
+      method: "POST", body: payload, headers: { "stripe-signature": `t=${timestamp},v1=${signature}` },
+    }), webhookEnv);
+    assert.equal(response.status, 400);
+  }
+  const forged = await worker.fetch(new Request("https://example.com/api/stripe/webhook", {
+    method: "POST", body: "{}", headers: { "stripe-signature": `t=${timestamp},v1=wrong` },
+  }), webhookEnv);
+  assert.equal(forged.status, 401);
 });
 
 test("known postbacks respond and unknown postbacks are ignored", async () => {

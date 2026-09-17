@@ -43,6 +43,7 @@ type CheckoutInput = {
 export async function createStripeCheckout(input: CheckoutInput) {
   const body = new URLSearchParams({
     mode: "payment",
+    "payment_method_types[0]": "card",
     locale: "ja",
     client_reference_id: input.orderId,
     success_url: `${input.returnUrl}?payment=success&session_id={CHECKOUT_SESSION_ID}`,
